@@ -1,0 +1,83 @@
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+  
+    - name: include vars
+      include_vars: vars.yml
+
+    - name: Create droplet
+      digital_ocean: 
+        state: present
+        command: droplet
+        api_token: "{{ token }}"
+        name: getter
+        size_id: 1gb
+        region_id: fra1
+        image_id: ubuntu-14-04-x64
+        ssh_key_ids: "{{ ssh_id }}"
+        wait_timeout: 500
+      register: do
+
+    - debug:
+        msg: "ID is {{ do.droplet.id }}"
+
+    - name: Add droplet to our inventory
+      add_host:
+        name: "{{ do.droplet.ip_address }}"
+        groups: do
+      when: do.droplet is defined
+
+
+- hosts: do
+  remote_user: root
+  gather_facts: false
+  
+  tasks: 
+    - name: Wait for 22 to become available
+      local_action: "wait_for port=22 host={{ inventory_hostname }}"
+
+    - name: Copy torrents file
+      copy:
+        src: ~/torrents
+        dest: /tmp
+
+    - name: Install aria
+      apt:
+        name: aria2
+        state: latest
+        update_cache: yes
+
+    - name: List all tmp files
+      find:
+        paths: /tmp/torrents/
+        patterns: "*.torrent"
+      register: torrents
+
+    - debug:
+        msg: "{{ torrents }}"
+
+    - name: Download torrent
+      command: /usr/bin/aria2c --seed-time=0 {{ item.path }}
+      with_items:
+        - "{{ torrents.files }}"
+
+    - name: Fetch files from remote to local
+      synchronize:
+        src: /root/
+        dest: ~/Movies/
+        dirs: yes
+        mode: pull
+
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Delete droplet
+      digital_ocean: 
+        state: absent
+        command: droplet
+        api_token: "{{ token }}"
+        name: getter
+        id: "{{ do.droplet.id }}"
+        wait_timeout: 500
